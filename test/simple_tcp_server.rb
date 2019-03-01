@@ -41,21 +41,39 @@ class SimpleTCPServer
     tcp_server = TCPServer.open(port)
 
     if ssl
-      context = OpenSSL::SSL::SSLContext.new
-      context.set_params(ssl)
+      context = OpenSSL::SSL::SSLContext.new.tap do |context|
+        context.set_params(ssl)
+        context.servername_cb = proc {|socket, name|
+          if name == 'localhost'
+            OpenSSL::SSL::SSLContext.new.tap do |new_context|
+              new_context.cert = OpenSSL::X509::Certificate.new(File.open(ssl_file_path('localhost-server.pem')))
+              new_context.key = OpenSSL::PKey::RSA.new(File.open(ssl_file_path('localhost-server-key.pem')))
+              new_context.ca_file = ssl_file_path('ca.pem')
+            end
+          else
+            OpenSSL::SSL::SSLContext.new.tap do |new_context|
+              new_context.cert = OpenSSL::X509::Certificate.new(File.open(ssl_file_path('no-sni.pem')))
+              new_context.key = OpenSSL::PKey::RSA.new(File.open(ssl_file_path('no-sni-key.pem')))
+              new_context.ca_file = ssl_file_path('ca.pem')
+            end
+          end
+        }
+      end
       tcp_server = OpenSSL::SSL::SSLServer.new(tcp_server, context)
     end
 
     self.server = tcp_server
     self.thread = Thread.new do
-      loop do
-        logger.debug 'Waiting for a client to connect'
+      begin
+        loop do
+          logger.debug 'Waiting for a client to connect'
 
-        # Wait for a client to connect
-        on_request(server.accept)
+          # Wait for a client to connect
+          on_request(server.accept)
+        end
+      rescue IOError, Errno::EBADF => exc
+        logger.info('Thread terminated', exc)
       end
-    rescue IOError, Errno::EBADF => exc
-      logger.info('Thread terminated', exc)
     end
   end
 
