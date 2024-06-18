@@ -1,10 +1,11 @@
-source 'http://rubygems.org'
+source "https://rubygems.org"
 
 gemspec
 
-gem 'rake'
-gem 'minitest'
-gem 'minitest-reporters'
-gem 'bson'
-gem 'awesome_print'
-gem 'semantic_logger'
+gem "amazing_print"
+gem "bson"
+gem "minitest"
+gem "minitest-reporters"
+gem "rake"
+gem "rubocop"
+gem "semantic_logger"

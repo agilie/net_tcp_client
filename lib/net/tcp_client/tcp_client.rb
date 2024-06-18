@@ -38,8 +38,8 @@ module Net
     include SemanticLogger::Loggable if defined?(SemanticLogger::Loggable)
 
     attr_accessor :connect_timeout, :read_timeout, :write_timeout,
-      :connect_retry_count, :connect_retry_interval, :retry_count,
-      :policy, :close_on_error, :buffered, :ssl, :proxy_server, :keepalive
+                  :connect_retry_count, :connect_retry_interval, :retry_count,
+                  :policy, :close_on_error, :buffered, :ssl, :proxy_server, :keepalive
     attr_reader :servers, :address, :socket, :ssl_handshake_timeout
 
     # Supports embedding user supplied data along with this connection
@@ -65,8 +65,8 @@ module Net
     # Return the array of errors that will result in an automatic connection retry
     #  To add any additional errors to the standard list:
     #    Net::TCPClient.reconnect_on_errors << Errno::EPROTO
-    def self.reconnect_on_errors
-      @reconnect_on_errors
+    class << self
+      attr_reader :reconnect_on_errors
     end
 
     # Create a connection, call the supplied block and close the connection on
@@ -81,19 +81,17 @@ module Net
     #     connect_retry_count:    5
     #   ) do |client|
     #     client.retry_on_connection_failure do
-    #       client.send('Update the database')
+    #       client.write('Update the database')
     #     end
     #     response = client.read(20)
     #     puts "Received: #{response}"
     #   end
     #
-    def self.connect(params={})
-      begin
-        connection = self.new(params)
-        yield(connection)
-      ensure
-        connection.close if connection
-      end
+    def self.connect(params = {})
+      connection = new(**params)
+      yield(connection)
+    ensure
+      connection&.close
     end
 
     # Create a new TCP Client connection
@@ -143,7 +141,7 @@ module Net
     #     upon use instead of possibly taking considerable time to fail.
     #     Default: true
     #
-    #   :connect_retry_count [Fixnum]
+    #   :connect_retry_count [Integer]
     #     Number of times to retry connecting when a connection fails
     #     Default: 10
     #
@@ -151,7 +149,7 @@ module Net
     #     Number of seconds between connection retry attempts after the first failed attempt
     #     Default: 0.5
     #
-    #   :retry_count [Fixnum]
+    #   :retry_count [Integer]
     #     Number of times to retry when calling #retry_on_connection_failure
     #     This is independent of :connect_retry_count which still applies with
     #     connection failures. This retry controls upto how many times to retry the
@@ -220,7 +218,7 @@ module Net
     #   )
     #
     #   client.retry_on_connection_failure do
-    #     client.send('Update the database')
+    #     client.write('Update the database')
     #   end
     #
     #   # Read upto 20 characters from the server
@@ -247,11 +245,10 @@ module Net
     #     }
     #   )
     def initialize(server: nil, servers: nil,
-      policy: :ordered, buffered: true, keepalive: true,
-      connect_timeout: 10.0, read_timeout: 60.0, write_timeout: 60.0,
-      connect_retry_count: 10, retry_count: 3, connect_retry_interval: 0.5, close_on_error: true,
-      on_connect: nil, proxy_server: nil, ssl: nil
-    )
+                   policy: :ordered, buffered: true, keepalive: true,
+                   connect_timeout: 10.0, read_timeout: 60.0, write_timeout: 60.0,
+                   connect_retry_count: 10, retry_count: 3, connect_retry_interval: 0.5, close_on_error: true,
+                   on_connect: nil, proxy_server: nil, ssl: nil)
       @read_timeout           = read_timeout.to_f
       @write_timeout          = write_timeout.to_f
       @connect_timeout        = connect_timeout.to_f
@@ -271,7 +268,7 @@ module Net
       @servers = [server] if server
       @servers = servers if servers
 
-      raise(ArgumentError, 'Missing mandatory :server or :servers') unless @servers
+      raise(ArgumentError, "Missing mandatory :server or :servers") unless @servers
 
       connect
     end
@@ -309,27 +306,29 @@ module Net
       begin
         connect_to_server(servers, policy)
         logger.info(message: "Connected to #{address}", duration: (Time.now - start_time) * 1000) if respond_to?(:logger)
-      rescue ConnectionFailure, ConnectionTimeout => exception
-        cause = exception.is_a?(ConnectionTimeout) ? exception : exception.cause
+      rescue ConnectionFailure, ConnectionTimeout => e
+        cause = e.is_a?(ConnectionTimeout) ? e : e.cause
         # Retry-able?
         if self.class.reconnect_on_errors.include?(cause.class) && (retries < connect_retry_count.to_i)
           retries += 1
-          logger.warn "#connect Failed to connect to any of #{servers.join(',')}. Sleeping:#{connect_retry_interval}s. Retry: #{retries}" if respond_to?(:logger)
+          if respond_to?(:logger)
+            logger.warn "#connect Failed to connect to any of #{servers.join(',')}. Sleeping:#{connect_retry_interval}s. Retry: #{retries}"
+          end
           sleep(connect_retry_interval)
           retry
         else
-          message = "#connect Failed to connect to any of #{servers.join(',')} after #{retries} retries. #{exception.class}: #{exception.message}"
-          logger.benchmark_error(message, exception: exception, duration: (Time.now - start_time)) if respond_to?(:logger)
+          message = "#connect Failed to connect to any of #{servers.join(',')} after #{retries} retries. #{e.class}: #{e.message}"
+          logger.benchmark_error(message, exception: e, duration: (Time.now - start_time)) if respond_to?(:logger)
           raise ConnectionFailure.new(message, address.to_s, cause)
         end
       end
     end
 
-    # Send data to the server
+    # Write data to the server
     #
-    # Use #with_retry to add resilience to the #send method
+    # Use #with_retry to add resilience to the #write method
     #
-    # Raises Net::TCPClient::ConnectionFailure whenever the send fails
+    # Raises Net::TCPClient::ConnectionFailure whenever the write fails
     #        For a description of the errors, see Socket#write
     #
     # Parameters
@@ -352,15 +351,15 @@ module Net
         payload        = {timeout: timeout}
         # With trace level also log the sent data
         payload[:data] = data if logger.trace?
-        logger.benchmark_debug('#write', payload: payload) do
+        logger.benchmark_debug("#write", payload: payload) do
           payload[:bytes] = socket_write(data, timeout)
         end
       else
         socket_write(data, timeout)
       end
-    rescue Exception => exc
+    rescue Exception => e
       close if close_on_error
-      raise exc
+      raise e
     end
 
     # Returns a response from the server
@@ -378,7 +377,7 @@ module Net
     #        to read the response from the connection
     #
     # Parameters
-    #   length [Fixnum]
+    #   length [Integer]
     #     The number of bytes to return
     #     #read will not return until 'length' bytes have been received from
     #     the server
@@ -402,7 +401,7 @@ module Net
     def read(length, buffer = nil, timeout = read_timeout)
       if respond_to?(:logger)
         payload = {bytes: length, timeout: timeout}
-        logger.benchmark_debug('#read', payload: payload) do
+        logger.benchmark_debug("#read", payload: payload) do
           data           = socket_read(length, buffer, timeout)
           # With trace level also log the received data
           payload[:data] = data if logger.trace?
@@ -411,16 +410,16 @@ module Net
       else
         socket_read(length, buffer, timeout)
       end
-    rescue Exception => exc
+    rescue Exception => e
       close if close_on_error
-      raise exc
+      raise e
     end
     
     def gets(character)
       @socket.gets(character)
     end
 
-    # Send and/or receive data with automatic retry on connection failure
+    # Write and/or receive data with automatic retry on connection failure
     #
     # On a connection failure, it will create a new connection and retry the block.
     # Returns immediately on exception Net::TCPClient::ReadTimeout
@@ -429,28 +428,28 @@ module Net
     # 1. Example of a resilient _readonly_ request:
     #
     #    When reading data from a server that does not change state on the server
-    #    Wrap both the send and the read with #retry_on_connection_failure
-    #    since it is safe to send the same data twice to the server
+    #    Wrap both the write and the read with #retry_on_connection_failure
+    #    since it is safe to write the same data twice to the server
     #
-    #    # Since the send can be sent many times it is safe to also put the receive
+    #    # Since the write can be sent many times it is safe to also put the receive
     #    # inside the retry block
     #    value = client.retry_on_connection_failure do
-    #      client.send("GETVALUE:count\n")
+    #      client.write("GETVALUE:count\n")
     #      client.read(20).strip.to_i
     #    end
     #
     # 2. Example of a resilient request that _modifies_ data on the server:
     #
     #    When changing state on the server, for example when updating a value
-    #    Wrap _only_ the send with #retry_on_connection_failure
+    #    Wrap _only_ the write with #retry_on_connection_failure
     #    The read must be outside the #retry_on_connection_failure since we must
-    #    not retry the send if the connection fails during the #read
+    #    not retry the write if the connection fails during the #read
     #
     #    value = 45
-    #    # Only the send is within the retry block since we cannot re-send once
-    #    # the send was successful since the server may have made the change
+    #    # Only the write is within the retry block since we cannot re-write once
+    #    # the write was successful since the server may have made the change
     #    client.retry_on_connection_failure do
-    #      client.send("SETVALUE:#{count}\n")
+    #      client.write("SETVALUE:#{count}\n")
     #    end
     #    # Server returns "SAVED" if the call was successful
     #    result = client.read(20).strip
@@ -466,20 +465,22 @@ module Net
       begin
         connect if closed?
         yield(self)
-      rescue ConnectionFailure => exception
-        exc_str = exception.cause ? "#{exception.cause.class}: #{exception.cause.message}" : exception.message
+      rescue ConnectionFailure => e
+        exc_str = e.cause ? "#{e.cause.class}: #{e.cause.message}" : e.message
         # Re-raise exceptions that should not be retried
-        if !self.class.reconnect_on_errors.include?(exception.cause.class)
+        if !self.class.reconnect_on_errors.include?(e.cause.class)
           logger.info "#retry_on_connection_failure not configured to retry: #{exc_str}" if respond_to?(:logger)
-          raise exception
+          raise e
         elsif retries < @retry_count
           retries += 1
-          logger.warn "#retry_on_connection_failure retry #{retries} due to #{exception.class}: #{exception.message}" if respond_to?(:logger)
+          logger.warn "#retry_on_connection_failure retry #{retries} due to #{e.class}: #{e.message}" if respond_to?(:logger)
           connect
           retry
         end
-        logger.error "#retry_on_connection_failure Connection failure: #{exception.class}: #{exception.message}. Giving up after #{retries} retries" if respond_to?(:logger)
-        raise ConnectionFailure.new("After #{retries} retries to host '#{server}': #{exc_str}", server, exception.cause)
+        if respond_to?(:logger)
+          logger.error "#retry_on_connection_failure Connection failure: #{e.class}: #{e.message}. Giving up after #{retries} retries"
+        end
+        raise ConnectionFailure.new("After #{retries} retries to any of #{servers.join(',')}': #{exc_str}", servers, e.cause)
       end
     end
 
@@ -491,14 +492,15 @@ module Net
       @socket  = nil
       @address = nil
       true
-    rescue IOError => exception
-      logger.warn "IOError when attempting to close socket: #{exception.class}: #{exception.message}" if respond_to?(:logger)
+    rescue IOError => e
+      logger.warn "IOError when attempting to close socket: #{e.class}: #{e.message}" if respond_to?(:logger)
       false
     end
 
     def flush
       return unless socket
-      respond_to?(:logger) ? logger.benchmark_debug('#flush') { socket.flush } : socket.flush
+
+      respond_to?(:logger) ? logger.benchmark_debug("#flush") { socket.flush } : socket.flush
     end
 
     def closed?
@@ -526,7 +528,11 @@ module Net
       return false if socket.nil? || closed?
 
       if IO.select([socket], nil, nil, 0)
-        !socket.eof? rescue false
+        begin
+          !socket.eof?
+        rescue StandardError
+          false
+        end
       else
         true
       end
@@ -548,8 +554,8 @@ module Net
       Policy::Base.factory(policy, servers).each do |address|
         begin
           return connect_to_address(address)
-        rescue ConnectionTimeout, ConnectionFailure => exception
-          last_exception = exception
+        rescue ConnectionTimeout, ConnectionFailure => e
+          last_exception = e
         end
       end
 
@@ -581,7 +587,7 @@ module Net
       @address = address
 
       # Invoke user supplied Block every time a new connection has been established
-      @on_connect.call(self) if @on_connect
+      @on_connect&.call(self)
     end
 
     # Connect to server
@@ -600,21 +606,21 @@ module Net
       rescue Errno::EISCONN
         # Connection was successful.
       rescue NonBlockingTimeout
-        raise ConnectionTimeout.new("Timed out after #{timeout} seconds trying to connect to #{address}")
-      rescue SystemCallError, IOError => exception
-        message = "#connect Connection failure connecting to '#{address.to_s}': #{exception.class}: #{exception.message}"
+        raise ConnectionTimeout, "Timed out after #{timeout} seconds trying to connect to #{address}"
+      rescue SystemCallError, IOError => e
+        message = "#connect Connection failure connecting to '#{address}': #{e.class}: #{e.message}"
         logger.error message if respond_to?(:logger)
-        raise ConnectionFailure.new(message, address.to_s, exception)
+        raise ConnectionFailure.new(message, address.to_s, e)
       end
     end
 
     # Write to the socket
     def socket_write(data, timeout)
-      if timeout < 0
+      if timeout.negative?
         socket.write(data)
       else
-        deadline = Time.now.utc + timeout
-        length = data.bytesize
+        deadline    = Time.now.utc + timeout
+        length      = data.bytesize
         total_count = 0
         non_blocking(socket, deadline) do
           loop do
@@ -625,22 +631,23 @@ module Net
             end
             total_count += count
             return total_count if total_count >= length
+
             data = data.byteslice(count..-1)
           end
         end
       end
     rescue NonBlockingTimeout
       logger.warn "#write Timeout after #{timeout} seconds" if respond_to?(:logger)
-      raise WriteTimeout.new("Timed out after #{timeout} seconds trying to write to #{address}")
-    rescue SystemCallError, IOError => exception
-      message = "#write Connection failure while writing to '#{address.to_s}': #{exception.class}: #{exception.message}"
+      raise WriteTimeout, "Timed out after #{timeout} seconds trying to write to #{address}"
+    rescue SystemCallError, IOError => e
+      message = "#write Connection failure while writing to '#{address}': #{e.class}: #{e.message}"
       logger.error message if respond_to?(:logger)
-      raise ConnectionFailure.new(message, address.to_s, exception)
+      raise ConnectionFailure.new(message, address.to_s, e)
     end
 
     def socket_read(length, buffer, timeout)
       result =
-        if timeout < 0
+        if timeout.negative?
           buffer.nil? ? socket.read(length) : socket.read(length, buffer)
         else
           deadline = Time.now.utc + timeout
@@ -652,19 +659,19 @@ module Net
       # EOF before all the data was returned
       if result.nil? || (result.length < length)
         logger.warn "#read server closed the connection before #{length} bytes were returned" if respond_to?(:logger)
-        raise ConnectionFailure.new('Connection lost while reading data', address.to_s, EOFError.new('end of file reached'))
+        raise ConnectionFailure.new("Connection lost while reading data", address.to_s, EOFError.new("end of file reached"))
       end
       result
     rescue NonBlockingTimeout
       logger.warn "#read Timeout after #{timeout} seconds" if respond_to?(:logger)
-      raise ReadTimeout.new("Timed out after #{timeout} seconds trying to read from #{address}")
-    rescue SystemCallError, IOError => exception
-      message = "#read Connection failure while reading data from '#{address.to_s}': #{exception.class}: #{exception.message}"
+      raise ReadTimeout, "Timed out after #{timeout} seconds trying to read from #{address}"
+    rescue SystemCallError, IOError => e
+      message = "#read Connection failure while reading data from '#{address}': #{e.class}: #{e.message}"
       logger.error message if respond_to?(:logger)
-      raise ConnectionFailure.new(message, address.to_s, exception)
+      raise ConnectionFailure.new(message, address.to_s, e)
     end
 
-    class NonBlockingTimeout< ::SocketError
+    class NonBlockingTimeout < ::SocketError
     end
 
     def non_blocking(socket, deadline)
@@ -672,16 +679,19 @@ module Net
     rescue IO::WaitReadable
       time_remaining = check_time_remaining(deadline)
       raise NonBlockingTimeout unless IO.select([socket], nil, nil, time_remaining)
+
       retry
     rescue IO::WaitWritable
       time_remaining = check_time_remaining(deadline)
       raise NonBlockingTimeout unless IO.select(nil, [socket], nil, time_remaining)
+
       retry
     end
 
     def check_time_remaining(deadline)
       time_remaining = deadline - Time.now.utc
-      raise NonBlockingTimeout if time_remaining < 0
+      raise NonBlockingTimeout if time_remaining.negative?
+
       time_remaining
     end
 
@@ -709,13 +719,13 @@ module Net
           rescue Errno::EISCONN
             # Connection was successful.
           rescue NonBlockingTimeout
-            raise ConnectionTimeout.new("SSL handshake Timed out after #{timeout} seconds trying to connect to #{address.to_s}")
+            raise ConnectionTimeout, "SSL handshake Timed out after #{timeout} seconds trying to connect to #{address}"
           end
         end
-      rescue SystemCallError, OpenSSL::SSL::SSLError, IOError => exception
-        message = "#connect SSL handshake failure with '#{address.to_s}': #{exception.class}: #{exception.message}"
+      rescue SystemCallError, OpenSSL::SSL::SSLError, IOError => e
+        message = "#connect SSL handshake failure with '#{address}': #{e.class}: #{e.message}"
         logger.error message if respond_to?(:logger)
-        raise ConnectionFailure.new(message, address.to_s, exception)
+        raise ConnectionFailure.new(message, address.to_s, e)
       end
 
       # Verify Peer certificate
@@ -725,20 +735,20 @@ module Net
 
     # Raises Net::TCPClient::ConnectionFailure if the peer certificate does not match its hostname
     def ssl_verify(ssl_socket, address)
-      unless OpenSSL::SSL.verify_certificate_identity(ssl_socket.peer_cert, address.host_name)
-        domains = extract_domains_from_cert(ssl_socket.peer_cert)
-        ssl_socket.close
-        message = "#connect SSL handshake failed due to a hostname mismatch. Request address was: '#{address.to_s}'" +
-                  "  Certificate valid for hostnames: #{domains.map { |d| "'#{d}'"}.join(',')}"
-        logger.error message if respond_to?(:logger)
-        raise ConnectionFailure.new(message, address.to_s)
-      end
+      return if OpenSSL::SSL.verify_certificate_identity(ssl_socket.peer_cert, address.host_name)
+
+      domains = extract_domains_from_cert(ssl_socket.peer_cert)
+      ssl_socket.close
+      message = "#connect SSL handshake failed due to a hostname mismatch. Request address was: '#{address}'" \
+                  "  Certificate valid for hostnames: #{domains.map { |d| "'#{d}'" }.join(',')}"
+      logger.error message if respond_to?(:logger)
+      raise ConnectionFailure.new(message, address.to_s)
     end
 
     def extract_domains_from_cert(cert)
-      cert.subject.to_a.each{|oid, value|
+      cert.subject.to_a.each do |oid, value|
         return [value] if oid == "CN"
-      }
+      end
     end
   end
 end

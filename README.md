@@ -1,9 +1,9 @@
 # net_tcp_client
-[![Gem Version](https://img.shields.io/gem/v/net_tcp_client.svg)](https://rubygems.org/gems/net_tcp_client) [![Build Status](https://travis-ci.org/rocketjob/net_tcp_client.svg?branch=master)](https://travis-ci.org/rocketjob/net_tcp_client) [![Downloads](https://img.shields.io/gem/dt/net_tcp_client.svg)](https://rubygems.org/gems/net_tcp_client) [![License](https://img.shields.io/badge/license-Apache%202.0-brightgreen.svg)](http://opensource.org/licenses/Apache-2.0) ![](https://img.shields.io/badge/status-Production%20Ready-blue.svg) [![Gitter chat](https://img.shields.io/badge/IRC%20(gitter)-Support-brightgreen.svg)](https://gitter.im/rocketjob/support)
+[![Gem Version](https://img.shields.io/gem/v/net_tcp_client.svg)](https://rubygems.org/gems/net_tcp_client) [![Build Status](https://github.com/reidmorrison/net_tcp_client/workflows/build/badge.svg)](https://github.com/reidmorrison/net_tcp_client/actions?query=workflow%3Abuild) [![Downloads](https://img.shields.io/gem/dt/net_tcp_client.svg)](https://rubygems.org/gems/net_tcp_client) [![License](https://img.shields.io/badge/license-Apache%202.0-brightgreen.svg)](http://opensource.org/licenses/Apache-2.0) ![](https://img.shields.io/badge/status-Production%20Ready-blue.svg)
 
 Net::TCPClient is a TCP Socket Client with automated failover, load balancing, retries and built-in timeouts.
 
-* http://github.com/rocketjob/net_tcp_client
+* https://github.com/reidmorrison/net_tcp_client
 
 ## Introduction
 
@@ -36,7 +36,7 @@ prevent a network issue from "hanging" the client program.
 require 'net/tcp_client'
 
 Net::TCPClient.connect(server: 'mydomain:3300') do |client|
-  client.send('Update the database')
+  client.write('Update the database')
   response = client.read(20)
   puts "Received: #{response}"
 end
@@ -48,7 +48,7 @@ Enable SSL encryption:
 require 'net/tcp_client'
 
 Net::TCPClient.connect(server: 'mydomain:3300', ssl: true) do |client|
-  client.send('Update the database')
+  client.write('Update the database')
   response = client.read(20)
   puts "Received: #{response}"
 end
@@ -104,7 +104,7 @@ Servers are tried in a Random order.
 ~~~ruby
 tcp_client = Net::TCPClient.new(
   servers: ['server1:3300', 'server2:3300', 'server3:3600'],
-  policy:  :ordered
+  policy:  :random
 )
 ~~~
 
@@ -145,7 +145,7 @@ Example run, the servers could be tried in the following order:
 If a connection cannot be established to any servers in the list Net::TCPClient will retry from the
 first server. This retry behavior can be controlled using the following options:
 
-* `connect_retry_count` [Fixnum]
+* `connect_retry_count` [Integer]
     * Number of times to retry connecting when a connection fails
     * Default: 10
 
@@ -153,7 +153,7 @@ first server. This retry behavior can be controlled using the following options:
     * Number of seconds between connection retry attempts after the first failed attempt
     * Default: 0.5
 
-* `retry_count` [Fixnum]
+* `retry_count` [Integer]
     * Number of times to retry when calling #retry_on_connection_failure
     * This is independent of :connect_retry_count which still applies with
     * connection failures. This retry controls upto how many times to retry the
@@ -184,16 +184,16 @@ Net::TCPClient.connect(
   connect_retry_interval: 0.1,
   connect_retry_count:    5
 ) do |client|
-  # If the connection is lost, create a new one and retry the send
+  # If the connection is lost, create a new one and retry the write
   client.retry_on_connection_failure do
-    client.send('How many users available?')
+    client.write('How many users available?')
     response = client.read(20)
     puts "Received: #{response}"
   end
 end
 ~~~
 
-If the connection is lost during either the `send` or the `read` above the
+If the connection is lost during either the `write` or the `read` above the
 entire block will be re-tried once the connection has been re-stablished.
 
 ## Callbacks
@@ -210,7 +210,7 @@ Any time a connection has been established a callback can be called to handle ac
 tcp_client = Net::TCPClient.new(
   servers: ['server1:3300', 'server2:3300', 'server3:3600'],
   on_connect: -> do |client|
-    client.send('My username and password')
+    client.write('My username and password')
     result = client.read(2)
     raise "Authentication failed" if result != 'OK'
   end
@@ -224,13 +224,13 @@ tcp_client = Net::TCPClient.new(
   servers: ['server1:3300', 'server2:3300', 'server3:3600'],
   on_connect: -> do |client|
     # Set the sequence number to 0
-    user_data = 0
+    client.user_data = 0
   end
 )
 
 tcp_client.retry_on_connection_failure do
-  # Send with the sequence number
-  tcp_client.send("#{tcp_client.user_data} hello")
+  # Write with the sequence number
+  tcp_client.write("#{tcp_client.user_data} hello")
   result = tcp_client.receive(30)
 
   # Increment sequence number after every call to the server
@@ -250,7 +250,7 @@ test on a daily basis, including connections over the internet between remote da
 
     gem install net_tcp_client
 
-To enable logging add [Semantic Logger](http://rocketjob.github.io/semantic_logger):
+To enable logging add [Semantic Logger](https://logger.rocketjob.io/):
 
     gem install semantic_logger
 
@@ -273,13 +273,13 @@ SemanticLogger.default_level = :trace
 SemanticLogger.add_appender(file_name: 'development.log', formatter: :color)
 ~~~
 
-If running Rails, see: [Semantic Logger Rails](http://rocketjob.github.io/semantic_logger/rails.html)
+If running Rails, see: [Semantic Logger Rails](https://logger.rocketjob.io/rails.html)
 
 ### Support
 
 Join the [Gitter chat session](https://gitter.im/rocketjob/support) if you have any questions.
 
-Issues / bugs can be reported via [Github issues](https://github.com/rocketjob/net_tcp_client/issues).
+Issues / bugs can be reported via [Github issues](https://github.com/reidmorrison/net_tcp_client/issues).
 
 ### Upgrading to V2
 
@@ -303,7 +303,7 @@ Tested and supported on the following Ruby platforms:
 - JRuby 1.7.23, 9.0 and above
 - Rubinius 2.5 and above
 
-There is a soft dependency on [Semantic Logger](http://github.com/rocketjob/semantic_logger). It will use SemanticLogger only if
+There is a soft dependency on [Semantic Logger](https://github.com/reidmorrison/semantic_logger). It will use SemanticLogger only if
 it is already available, otherwise any other standard Ruby logger can be used.
 
 ### Note
@@ -314,8 +314,8 @@ Be sure to place the `semantic_logger` gem dependency before `net_tcp_client` in
 
 [Reid Morrison](https://github.com/reidmorrison)
 
-[Contributors](https://github.com/rocketjob/net_tcp_client/graphs/contributors)
+[Contributors](https://github.com/reidmorrison/net_tcp_client/graphs/contributors)
 
 ## Versioning
 
-This project uses [Semantic Versioning](http://semver.org/).
+This project uses [Semantic Versioning](https://semver.org/).

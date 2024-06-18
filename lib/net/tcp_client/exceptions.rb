@@ -1,10 +1,11 @@
 module Net
   class TCPClient
-
     class ConnectionTimeout < ::SocketError
     end
+
     class ReadTimeout < ::SocketError
     end
+
     class WriteTimeout < ::SocketError
     end
 
@@ -27,12 +28,11 @@ module Net
       #
       #   cause [Exception]
       #     Original Exception if any, otherwise nil
-      def initialize(message, server, cause=nil)
+      def initialize(message, server, cause = nil)
         @server = server
         @cause  = cause
         super(message)
       end
     end
-
   end
 end
